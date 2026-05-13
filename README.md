@@ -1,4 +1,4 @@
-![logo](https://imgur.com/WizyCvY)
+![logo](https://i.imgur.com/WizyCvY.png)
 
 Dithering playground inspired by Dither Boy. Its open source and free!
 
