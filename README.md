@@ -9,12 +9,13 @@ cmake -S . -B build
 cmake --build build
 ./build/opendither
 ```
+## Future/Goals
 
-You can optionally pass a PPM image (`P3` or `P6`) as the first argument:
+1  - UI port to windows
+2  - add post processing and glow effects (and much more)
+3  - video support
+4  - keyframe support for dithering settings of videos and images
 
-```sh
-./build/opendither image.ppm
-```
 
 ## Current Controls
 
