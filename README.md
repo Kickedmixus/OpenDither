@@ -11,10 +11,10 @@ cmake --build build
 ```
 ## Future/Goals
 
-1  - UI port to windows
-2  - add post processing and glow effects (and much more)
-3  - video support
-4  - keyframe support for dithering settings of videos and images
+- UI port to windows
+- add post processing and glow effects (and much more)
+- video support
+- keyframe support for dithering settings of videos and images
 
 
 ## Current Controls
