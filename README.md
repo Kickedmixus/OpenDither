@@ -1,4 +1,5 @@
 ![logo](https://i.imgur.com/BcMysWw.png)
+
 dithering playground inspired by Dither Boy. Its open source and free!
 
 ## Build
