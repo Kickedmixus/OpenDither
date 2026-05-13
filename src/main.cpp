@@ -21,70 +21,17 @@
 #include <vector>
 #include <unistd.h>
 
+#include "core.hpp"
+
 namespace {
 
-constexpr int kPanelWidth = 260;
+constexpr int kPanelWidth = 340;
 constexpr int kMargin = 16;
-constexpr int kSliderWidth = 190;
+constexpr int kSliderWidth = 290;
 constexpr int kSliderHeight = 18;
 constexpr int kButtonHeight = 28;
 constexpr int kFooterHeight = 28;
-constexpr int kTabHeight = 28;
-constexpr int kSwatchSize = 28;
-
-struct Pixel {
-    std::uint8_t r = 0;
-    std::uint8_t g = 0;
-    std::uint8_t b = 0;
-};
-
-struct Image {
-    int width = 0;
-    int height = 0;
-    std::vector<Pixel> pixels;
-};
-
-enum class Formula {
-    Threshold,
-    OrderedBayer,
-    FloydSteinberg,
-    Atkinson,
-    JarvisJudiceNinke,
-};
-
-enum class PreviewMode {
-    Original,
-    Dithered,
-};
-
-enum class ColorMode {
-    Monochrome,
-    Palette,
-    HorizontalGradient,
-    VerticalGradient,
-    RadialGradient,
-};
-
-enum class SideTab {
-    Colors,
-    Dither,
-};
-
-struct Settings {
-    double threshold = 128.0;
-    double contrast = 1.0;
-    double brightness = 0.0;
-    double noise = 0.0;
-    int scale = 2;
-    Formula formula = Formula::FloydSteinberg;
-    ColorMode colorMode = ColorMode::Monochrome;
-    SideTab activeTab = SideTab::Dither;
-    int selectedColorIndex = 0;
-    std::vector<Pixel> colors{
-        Pixel{0, 0, 0},
-        Pixel{255, 255, 255},
-    };
-};
+constexpr int kSwatchSize = 24;
 
 struct Rect {
     int x = 0;
@@ -169,269 +116,42 @@ struct Palette {
     unsigned long border = 0;
 };
 
-Palette makePalette(Display* display, int screen) {
+Palette makePalette(Display* display, int screen, Theme theme) {
     const Visual* visual = DefaultVisual(display, screen);
+    if (theme == Theme::Dark) {
+        return Palette{
+            pixelFromRgb(visual, 22, 24, 29),
+            pixelFromRgb(visual, 31, 34, 40),
+            pixelFromRgb(visual, 236, 238, 243),
+            pixelFromRgb(visual, 146, 153, 168),
+            pixelFromRgb(visual, 54, 58, 68),
+            pixelFromRgb(visual, 92, 138, 255),
+            pixelFromRgb(visual, 10, 12, 16),
+            pixelFromRgb(visual, 40, 44, 52),
+            pixelFromRgb(visual, 240, 242, 245),
+            pixelFromRgb(visual, 72, 78, 90),
+            pixelFromRgb(visual, 255, 255, 255),
+            pixelFromRgb(visual, 0, 0, 0),
+            pixelFromRgb(visual, 255, 255, 255),
+            pixelFromRgb(visual, 53, 57, 67),
+        };
+    }
     return Palette{
-        pixelFromRgb(visual, 242, 240, 235),
-        pixelFromRgb(visual, 232, 229, 222),
-        pixelFromRgb(visual, 28, 28, 28),
-        pixelFromRgb(visual, 84, 84, 84),
-        pixelFromRgb(visual, 196, 196, 196),
-        pixelFromRgb(visual, 42, 95, 180),
-        pixelFromRgb(visual, 24, 24, 24),
-        pixelFromRgb(visual, 225, 225, 225),
-        pixelFromRgb(visual, 30, 30, 30),
-        pixelFromRgb(visual, 34, 34, 34),
+        pixelFromRgb(visual, 245, 246, 248),
+        pixelFromRgb(visual, 231, 234, 239),
+        pixelFromRgb(visual, 25, 27, 31),
+        pixelFromRgb(visual, 95, 101, 114),
+        pixelFromRgb(visual, 204, 208, 214),
+        pixelFromRgb(visual, 51, 116, 228),
+        pixelFromRgb(visual, 244, 245, 247),
+        pixelFromRgb(visual, 223, 225, 229),
+        pixelFromRgb(visual, 30, 33, 38),
+        pixelFromRgb(visual, 39, 44, 53),
         pixelFromRgb(visual, 255, 255, 255),
         pixelFromRgb(visual, 0, 0, 0),
         pixelFromRgb(visual, 255, 255, 255),
-        pixelFromRgb(visual, 209, 206, 198),
+        pixelFromRgb(visual, 198, 202, 210),
     };
-}
-
-Image makeDemoImage() {
-    Image image;
-    image.width = 256;
-    image.height = 192;
-    image.pixels.resize(static_cast<std::size_t>(image.width * image.height));
-
-    for (int y = 0; y < image.height; ++y) {
-        for (int x = 0; x < image.width; ++x) {
-            const double nx = static_cast<double>(x) / (image.width - 1);
-            const double ny = static_cast<double>(y) / (image.height - 1);
-            const double wave = (std::sin(nx * 18.0) + std::cos(ny * 14.0)) * 0.5;
-            const double vignette = 1.0 - std::hypot(nx - 0.5, ny - 0.5);
-            const int value = static_cast<int>(255.0 * clampDouble(nx * 0.55 + ny * 0.25 + wave * 0.12 + vignette * 0.22, 0.0, 1.0));
-            image.pixels[static_cast<std::size_t>(y * image.width + x)] = Pixel{toByte(value), toByte(value * 0.92 + x % 32), toByte(value * 0.85 + y % 48)};
-        }
-    }
-
-    return image;
-}
-
-std::string readToken(std::istream& input) {
-    std::string token;
-    while (input >> token) {
-        if (!token.empty() && token[0] == '#') {
-            std::string rest;
-            std::getline(input, rest);
-            continue;
-        }
-        return token;
-    }
-    return {};
-}
-
-std::optional<Image> loadPpm(const std::string& path) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
-        return std::nullopt;
-    }
-
-    const std::string magic = readToken(file);
-    if (magic != "P3" && magic != "P6") {
-        return std::nullopt;
-    }
-
-    Image image;
-    image.width = std::stoi(readToken(file));
-    image.height = std::stoi(readToken(file));
-    const int maxValue = std::stoi(readToken(file));
-    if (image.width <= 0 || image.height <= 0 || maxValue <= 0) {
-        return std::nullopt;
-    }
-
-    image.pixels.resize(static_cast<std::size_t>(image.width * image.height));
-    const auto scaleValue = [maxValue](int value) {
-        return toByte(static_cast<double>(value) * 255.0 / maxValue);
-    };
-
-    if (magic == "P3") {
-        for (Pixel& pixel : image.pixels) {
-            pixel.r = scaleValue(std::stoi(readToken(file)));
-            pixel.g = scaleValue(std::stoi(readToken(file)));
-            pixel.b = scaleValue(std::stoi(readToken(file)));
-        }
-        return image;
-    }
-
-    file.get();
-    for (Pixel& pixel : image.pixels) {
-        unsigned char rgbBytes[3]{};
-        file.read(reinterpret_cast<char*>(rgbBytes), 3);
-        if (!file) {
-            return std::nullopt;
-        }
-        pixel.r = scaleValue(rgbBytes[0]);
-        pixel.g = scaleValue(rgbBytes[1]);
-        pixel.b = scaleValue(rgbBytes[2]);
-    }
-    return image;
-}
-
-std::string shellQuote(const std::string& value) {
-    std::string quoted = "'";
-    for (char ch : value) {
-        if (ch == '\'') {
-            quoted += "'\\''";
-        } else {
-            quoted += ch;
-        }
-    }
-    quoted += "'";
-    return quoted;
-}
-
-std::optional<std::filesystem::path> makeTempPpmPath() {
-    std::filesystem::path templatePath = std::filesystem::temp_directory_path() / "opendither-import-XXXXXX.ppm";
-    std::string temp = templatePath.string();
-    std::vector<char> buffer(temp.begin(), temp.end());
-    buffer.push_back('\0');
-
-    int fd = mkstemps(buffer.data(), 4);
-    if (fd == -1) {
-        return std::nullopt;
-    }
-    close(fd);
-    return std::filesystem::path(buffer.data());
-}
-
-std::optional<Image> loadImageAny(const std::string& path) {
-    if (auto ppm = loadPpm(path)) {
-        return ppm;
-    }
-
-    const auto tempPath = makeTempPpmPath();
-    if (!tempPath) {
-        return std::nullopt;
-    }
-
-    const std::string command = "ffmpeg -y -hide_banner -loglevel error -i " + shellQuote(path) + " -frames:v 1 -f image2 -vcodec ppm " + shellQuote(tempPath->string());
-    if (std::system(command.c_str()) != 0) {
-        std::filesystem::remove(*tempPath);
-        return std::nullopt;
-    }
-
-    std::optional<Image> image = loadPpm(tempPath->string());
-    std::filesystem::remove(*tempPath);
-    return image;
-}
-
-double luminance(const Pixel& pixel, const Settings& settings, int x, int y) {
-    double value = pixel.r * 0.299 + pixel.g * 0.587 + pixel.b * 0.114;
-    value = (value - 128.0) * settings.contrast + 128.0 + settings.brightness;
-    if (settings.noise > 0.0) {
-        const unsigned int hash = static_cast<unsigned int>((x * 73856093) ^ (y * 19349663));
-        const double noise = (static_cast<double>(hash % 1024) / 1023.0 - 0.5) * settings.noise;
-        value += noise;
-    }
-    return clampDouble(value, 0.0, 255.0);
-}
-
-std::vector<std::uint8_t> ditherImage(const Image& input, const Settings& settings) {
-    const int width = input.width;
-    const int height = input.height;
-    std::vector<double> gray(static_cast<std::size_t>(width * height), 0.0);
-    std::vector<std::uint8_t> output(static_cast<std::size_t>(width * height), 0);
-
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            gray[static_cast<std::size_t>(y * width + x)] = luminance(input.pixels[static_cast<std::size_t>(y * width + x)], settings, x, y);
-        }
-    }
-
-    const auto writeThreshold = [&](int x, int y, double threshold) {
-        const std::size_t index = static_cast<std::size_t>(y * width + x);
-        output[index] = gray[index] >= threshold ? 255 : 0;
-    };
-
-    if (settings.formula == Formula::Threshold) {
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                writeThreshold(x, y, settings.threshold);
-            }
-        }
-        return output;
-    }
-
-    if (settings.formula == Formula::OrderedBayer) {
-        constexpr std::array<std::array<int, 4>, 4> bayer{{
-            {{0, 8, 2, 10}},
-            {{12, 4, 14, 6}},
-            {{3, 11, 1, 9}},
-            {{15, 7, 13, 5}},
-        }};
-        for (int y = 0; y < height; ++y) {
-            for (int x = 0; x < width; ++x) {
-                const double offset = (static_cast<double>(bayer[static_cast<std::size_t>(y % 4)][static_cast<std::size_t>(x % 4)]) - 7.5) * 10.0;
-                writeThreshold(x, y, settings.threshold + offset);
-            }
-        }
-        return output;
-    }
-
-    const auto diffuse = [&](int x, int y, double error, double factor) {
-        if (x < 0 || y < 0 || x >= width || y >= height) {
-            return;
-        }
-        const std::size_t index = static_cast<std::size_t>(y * width + x);
-        gray[index] = clampDouble(gray[index] + error * factor, 0.0, 255.0);
-    };
-
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            const std::size_t index = static_cast<std::size_t>(y * width + x);
-            const double oldValue = gray[index];
-            const double newValue = oldValue >= settings.threshold ? 255.0 : 0.0;
-            const double error = oldValue - newValue;
-            output[index] = toByte(newValue);
-
-            if (settings.formula == Formula::FloydSteinberg) {
-                diffuse(x + 1, y, error, 7.0 / 16.0);
-                diffuse(x - 1, y + 1, error, 3.0 / 16.0);
-                diffuse(x, y + 1, error, 5.0 / 16.0);
-                diffuse(x + 1, y + 1, error, 1.0 / 16.0);
-            } else if (settings.formula == Formula::Atkinson) {
-                diffuse(x + 1, y, error, 1.0 / 8.0);
-                diffuse(x + 2, y, error, 1.0 / 8.0);
-                diffuse(x - 1, y + 1, error, 1.0 / 8.0);
-                diffuse(x, y + 1, error, 1.0 / 8.0);
-                diffuse(x + 1, y + 1, error, 1.0 / 8.0);
-                diffuse(x, y + 2, error, 1.0 / 8.0);
-            } else if (settings.formula == Formula::JarvisJudiceNinke) {
-                diffuse(x + 1, y, error, 7.0 / 48.0);
-                diffuse(x + 2, y, error, 5.0 / 48.0);
-                diffuse(x - 2, y + 1, error, 3.0 / 48.0);
-                diffuse(x - 1, y + 1, error, 5.0 / 48.0);
-                diffuse(x, y + 1, error, 7.0 / 48.0);
-                diffuse(x + 1, y + 1, error, 5.0 / 48.0);
-                diffuse(x + 2, y + 1, error, 3.0 / 48.0);
-                diffuse(x - 2, y + 2, error, 1.0 / 48.0);
-                diffuse(x - 1, y + 2, error, 3.0 / 48.0);
-                diffuse(x, y + 2, error, 5.0 / 48.0);
-                diffuse(x + 1, y + 2, error, 3.0 / 48.0);
-                diffuse(x + 2, y + 2, error, 1.0 / 48.0);
-            }
-        }
-    }
-
-    return output;
-}
-
-bool savePpm(const std::string& path, const Image& image, const std::vector<std::uint8_t>& dithered) {
-    std::ofstream file(path, std::ios::binary);
-    if (!file) {
-        return false;
-    }
-
-    file << "P6\n" << image.width << " " << image.height << "\n255\n";
-    for (std::uint8_t value : dithered) {
-        const char byte = static_cast<char>(value);
-        file.write(&byte, 1);
-        file.write(&byte, 1);
-        file.write(&byte, 1);
-    }
-    return true;
 }
 
 std::optional<std::string> chooseImagePath() {
@@ -533,17 +253,6 @@ std::optional<Pixel> chooseColor(const Pixel& initial) {
     return parseColorString(output);
 }
 
-const char* formulaName(Formula formula) {
-    switch (formula) {
-        case Formula::Threshold: return "Threshold";
-        case Formula::OrderedBayer: return "Ordered Bayer";
-        case Formula::FloydSteinberg: return "Floyd-Steinberg";
-        case Formula::Atkinson: return "Atkinson";
-        case Formula::JarvisJudiceNinke: return "Jarvis";
-    }
-    return "Unknown";
-}
-
 void fillRect(Display* display, Window window, GC gc, const Rect& rect, unsigned long color) {
     XSetForeground(display, gc, color);
     XFillRectangle(display, window, gc, rect.x, rect.y, static_cast<unsigned int>(rect.w), static_cast<unsigned int>(rect.h));
@@ -573,9 +282,9 @@ std::vector<Button> makeButtons() {
     };
 }
 
-void layoutControls(std::vector<Slider>& sliders, std::vector<Button>& buttons, int windowWidth) {
+void layoutControls(std::vector<Slider>& sliders, std::vector<Button>& buttons, int windowWidth, SideTab activeTab) {
     const int panelX = windowWidth - kPanelWidth + kMargin;
-    int y = 138;
+    int y = activeTab == SideTab::Dither ? 226 : 226;
     for (Slider& slider : sliders) {
         slider.rect = Rect{panelX, y + 16, kSliderWidth, kSliderHeight};
         y += 58;
@@ -608,29 +317,29 @@ void drawButton(Display* display, Window window, GC gc, const Palette& palette, 
     drawText(display, window, gc, button.rect.x + 10, button.rect.y + 18, button.label, fg);
 }
 
-void drawToggle(Display* display, Window window, GC gc, const Palette& palette, const Rect& rect, const std::string& label) {
-    fillRect(display, window, gc, rect, palette.button);
-    drawText(display, window, gc, rect.x + 10, rect.y + 18, label, palette.buttonText);
+void drawToggle(Display* display, Window window, GC gc, const Palette& palette, const Rect& rect, const std::string& label, bool active = false) {
+    fillRect(display, window, gc, rect, active ? palette.buttonActive : palette.button);
+    drawText(display, window, gc, rect.x + 10, rect.y + 18, label, active ? palette.buttonActiveText : palette.buttonText);
 }
 
 void drawFooter(Display* display, Drawable drawable, GC gc, const Palette& palette, int windowWidth, int windowHeight, PreviewMode previewMode) {
     const Rect footer{0, windowHeight - kFooterHeight, windowWidth, kFooterHeight};
     fillRect(display, drawable, gc, footer, palette.panel);
-    drawText(display, drawable, gc, kMargin, windowHeight - 9, "Space/Flip toggle  I/Import image  R reset  S save  Esc quit", palette.text);
+    drawText(display, drawable, gc, kMargin, windowHeight - 9, "Drag to pan  Wheel to zoom  I import  Space toggle  R reset  S save  Esc quit", palette.text);
     drawText(display, drawable, gc, windowWidth - 170, windowHeight - 9, previewMode == PreviewMode::Dithered ? "View: dithered" : "View: original", palette.mutedText);
 }
 
-void drawPixelSizeControl(Display* display, Window window, GC gc, const Palette& palette, int windowWidth, int scale) {
+void drawStepControl(Display* display, Window window, GC gc, const Palette& palette, int windowWidth, int topY, const std::string& label, int value, const std::string& suffix) {
     const int panelX = windowWidth - kPanelWidth + kMargin;
-    drawText(display, window, gc, panelX, 64, "Pixel Size", palette.text);
+    drawText(display, window, gc, panelX, topY, label, palette.text);
 
-    const Rect minus{panelX, 78, 38, 26};
-    const Rect plus{panelX + 52, 78, 38, 26};
+    const Rect minus{panelX, topY + 14, 38, 26};
+    const Rect plus{panelX + 52, topY + 14, 38, 26};
     fillRect(display, window, gc, minus, palette.button);
     fillRect(display, window, gc, plus, palette.button);
     drawText(display, window, gc, minus.x + 14, minus.y + 18, "-", palette.buttonText);
     drawText(display, window, gc, plus.x + 14, plus.y + 18, "+", palette.buttonText);
-    drawText(display, window, gc, plus.x + 52, plus.y + 18, std::to_string(scale) + "x", palette.text);
+    drawText(display, window, gc, plus.x + 52, plus.y + 18, std::to_string(value) + suffix, palette.text);
 }
 
 void drawTab(Display* display, Window window, GC gc, const Palette& palette, const Rect& rect, const std::string& label, bool active) {
@@ -648,20 +357,18 @@ void drawSwatch(Display* display, Window window, GC gc, const Palette& palette, 
     }
 }
 
-void drawColorModeButton(Display* display, Window window, GC gc, const Palette& palette, const Rect& rect, const std::string& label, bool active) {
-    fillRect(display, window, gc, rect, active ? palette.buttonActive : palette.button);
-    drawText(display, window, gc, rect.x + 10, rect.y + 18, label, active ? palette.buttonActiveText : palette.buttonText);
+void drawMiniSlider(Display* display, Window window, GC gc, const Palette& palette, const Rect& rect, const std::string& label, double value, double minValue, double maxValue) {
+    drawText(display, window, gc, rect.x, rect.y - 7, label, palette.text);
+    fillRect(display, window, gc, rect, palette.track);
+    const double t = clampDouble((value - minValue) / (maxValue - minValue), 0.0, 1.0);
+    const int filled = static_cast<int>(std::lround(t * rect.w));
+    fillRect(display, window, gc, Rect{rect.x, rect.y, filled, rect.h}, palette.fill);
+    fillRect(display, window, gc, Rect{rect.x + filled - 4, rect.y - 3, 8, rect.h + 6}, palette.knob);
 }
 
-const char* colorModeName(ColorMode mode) {
-    switch (mode) {
-        case ColorMode::Monochrome: return "Mono";
-        case ColorMode::Palette: return "Palette";
-        case ColorMode::HorizontalGradient: return "H Grad";
-        case ColorMode::VerticalGradient: return "V Grad";
-        case ColorMode::RadialGradient: return "Radial";
-    }
-    return "Color";
+void drawModeButton(Display* display, Window window, GC gc, const Palette& palette, const Rect& rect, const std::string& label, bool active) {
+    fillRect(display, window, gc, rect, active ? palette.buttonActive : palette.button);
+    drawText(display, window, gc, rect.x + 10, rect.y + 18, label, active ? palette.buttonActiveText : palette.buttonText);
 }
 
 void updateSliderFromMouse(const Slider& slider, int mouseX) {
@@ -669,84 +376,30 @@ void updateSliderFromMouse(const Slider& slider, int mouseX) {
     *slider.value = slider.min + t * (slider.max - slider.min);
 }
 
-Pixel lerpColor(const Pixel& a, const Pixel& b, double t) {
-    return Pixel{
-        toByte(a.r + (b.r - a.r) * t),
-        toByte(a.g + (b.g - a.g) * t),
-        toByte(a.b + (b.b - a.b) * t),
-    };
-}
-
-Pixel sampleColors(const std::vector<Pixel>& colors, double t) {
-    if (colors.empty()) {
-        return Pixel{0, 0, 0};
-    }
-    if (colors.size() == 1) {
-        return colors.front();
-    }
-
-    t = clampDouble(t, 0.0, 1.0);
-    const double segment = t * static_cast<double>(colors.size() - 1);
-    const std::size_t index = static_cast<std::size_t>(segment);
-    const double localT = segment - static_cast<double>(index);
-    if (index >= colors.size() - 1) {
-        return colors.back();
-    }
-    return lerpColor(colors[index], colors[index + 1], localT);
-}
-
-PreviewLayout computePreviewLayout(const Image& source, int settingsScale, int windowWidth, int windowHeight) {
+PreviewLayout computePreviewLayout(int windowWidth, int windowHeight) {
     const int previewLeft = kMargin;
     const int previewTop = 44;
     const int previewRight = windowWidth - kPanelWidth - kMargin;
-    const int previewBottom = windowHeight - kFooterHeight - 130;
+    const int previewBottom = windowHeight - kFooterHeight - 60;
     const int maxPreviewWidth = std::max(1, previewRight - previewLeft);
     const int maxPreviewHeight = std::max(1, previewBottom - previewTop);
-    const double desiredScale = static_cast<double>(std::max(1, settingsScale));
-    const double fitScale = std::min(
-        static_cast<double>(maxPreviewWidth) / std::max(1, source.width),
-        static_cast<double>(maxPreviewHeight) / std::max(1, source.height)
-    );
-    const double chosenScale = std::min(desiredScale, fitScale);
-    const int width = std::max(1, static_cast<int>(std::lround(source.width * chosenScale)));
-    const int height = std::max(1, static_cast<int>(std::lround(source.height * chosenScale)));
     return PreviewLayout{
-        width,
-        height,
-        previewLeft + (maxPreviewWidth - width) / 2,
-        previewTop + std::max(0, (maxPreviewHeight - height) / 2),
+        maxPreviewWidth,
+        maxPreviewHeight,
+        previewLeft,
+        previewTop,
     };
 }
 
-Pixel colorizePixel(const Image& source, const Settings& settings, int sourceX, int sourceY, std::uint8_t ditherValue) {
-    const Pixel dark = settings.colors.empty() ? Pixel{0, 0, 0} : settings.colors.front();
-    const Pixel light = settings.colors.size() > 1 ? settings.colors[1] : Pixel{255, 255, 255};
-
-    switch (settings.colorMode) {
-        case ColorMode::Monochrome:
-            return ditherValue ? light : dark;
-        case ColorMode::Palette:
-            return sampleColors(settings.colors, ditherValue ? 1.0 : 0.0);
-        case ColorMode::HorizontalGradient: {
-            const double t = source.width <= 1 ? 0.0 : static_cast<double>(sourceX) / (source.width - 1);
-            return sampleColors(settings.colors, t);
-        }
-        case ColorMode::VerticalGradient: {
-            const double t = source.height <= 1 ? 0.0 : static_cast<double>(sourceY) / (source.height - 1);
-            return sampleColors(settings.colors, t);
-        }
-        case ColorMode::RadialGradient: {
-            const double nx = source.width <= 1 ? 0.0 : (static_cast<double>(sourceX) / (source.width - 1)) - 0.5;
-            const double ny = source.height <= 1 ? 0.0 : (static_cast<double>(sourceY) / (source.height - 1)) - 0.5;
-            const double t = clampDouble(std::hypot(nx, ny) * 2.0, 0.0, 1.0);
-            return sampleColors(settings.colors, t);
-        }
-    }
-
-    return light;
+double previewScaleForLayout(const Image& source, const PreviewLayout& layout, int zoom) {
+    const double fitScale = std::min(
+        static_cast<double>(layout.width) / std::max(1, source.width),
+        static_cast<double>(layout.height) / std::max(1, source.height)
+    );
+    return fitScale * std::max(1, zoom);
 }
 
-void drawPreview(Display* display, Drawable drawable, GC gc, const Visual* visual, const Image& source, const std::vector<std::uint8_t>& dithered, const Settings& settings, PreviewMode mode, int previewX, int previewY, int targetWidth, int targetHeight) {
+void drawPreview(Display* display, Drawable drawable, GC gc, const Visual* visual, const Image& source, const std::vector<std::uint8_t>& dithered, const Settings& settings, PreviewMode mode, const PreviewLayout& layout, double panX, double panY) {
     XImage* image = XCreateImage(
         display,
         DefaultVisual(display, DefaultScreen(display)),
@@ -754,8 +407,8 @@ void drawPreview(Display* display, Drawable drawable, GC gc, const Visual* visua
         ZPixmap,
         0,
         nullptr,
-        static_cast<unsigned int>(targetWidth),
-        static_cast<unsigned int>(targetHeight),
+        static_cast<unsigned int>(layout.width),
+        static_cast<unsigned int>(layout.height),
         32,
         0
     );
@@ -771,20 +424,32 @@ void drawPreview(Display* display, Drawable drawable, GC gc, const Visual* visua
         return;
     }
 
-    for (int y = 0; y < targetHeight; ++y) {
-        const int sourceY = std::min(source.height - 1, static_cast<int>((static_cast<long long>(y) * source.height) / std::max(1, targetHeight)));
-        for (int x = 0; x < targetWidth; ++x) {
-            const int sourceX = std::min(source.width - 1, static_cast<int>((static_cast<long long>(x) * source.width) / std::max(1, targetWidth)));
-            const std::size_t index = static_cast<std::size_t>(sourceY * source.width + sourceX);
-            const Pixel output = mode == PreviewMode::Original
-                ? source.pixels[index]
-                : colorizePixel(source, settings, sourceX, sourceY, dithered[index]);
+    const double zoomScale = previewScaleForLayout(source, layout, settings.scale);
+    const double centerX = static_cast<double>(source.width) * 0.5 + panX;
+    const double centerY = static_cast<double>(source.height) * 0.5 + panY;
+
+    for (int y = 0; y < layout.height; ++y) {
+        const double sampleY = (static_cast<double>(y) - layout.height * 0.5) / zoomScale + centerY;
+        for (int x = 0; x < layout.width; ++x) {
+            const double sampleX = (static_cast<double>(x) - layout.width * 0.5) / zoomScale + centerX;
+            const bool inside = sampleX >= 0.0 && sampleY >= 0.0 && sampleX < source.width && sampleY < source.height;
+            Pixel output = Pixel{};
+            if (inside) {
+                const int sourceX = static_cast<int>(sampleX);
+                const int sourceY = static_cast<int>(sampleY);
+                const std::size_t index = static_cast<std::size_t>(sourceY * source.width + sourceX);
+                output = mode == PreviewMode::Original
+                    ? source.pixels[index]
+                    : channelColor(source, settings, std::min<int>(dithered[index], settings.channelCount - 1), sourceX, sourceY);
+            } else {
+                output = Pixel{20, 22, 28};
+            }
             const unsigned long pixel = pixelFromRgb(visual, output.r, output.g, output.b);
             XPutPixel(image, x, y, pixel);
         }
     }
 
-    XPutImage(display, drawable, gc, image, 0, 0, previewX, previewY, static_cast<unsigned int>(targetWidth), static_cast<unsigned int>(targetHeight));
+    XPutImage(display, drawable, gc, image, 0, 0, layout.x, layout.y, static_cast<unsigned int>(layout.width), static_cast<unsigned int>(layout.height));
     XDestroyImage(image);
 }
 
@@ -825,11 +490,12 @@ int main(int argc, char** argv) {
     const int screen = DefaultScreen(display);
     const Visual* visual = DefaultVisual(display, screen);
     const int depth = DefaultDepth(display, screen);
-    const Palette palette = makePalette(display, screen);
     Settings settings;
+    ensureChannelCount(settings);
     PreviewMode previewMode = PreviewMode::Dithered;
     auto sliders = makeSliders(settings);
     auto buttons = makeButtons();
+    Palette palette = makePalette(display, screen, settings.theme);
 
     int windowWidth = 920;
     int windowHeight = 720;
@@ -856,7 +522,15 @@ int main(int argc, char** argv) {
     bool importPending = false;
     std::atomic<bool> importCompleted{false};
     int activeSlider = -1;
-    std::vector<std::uint8_t> dithered = ditherImage(source, settings);
+    double viewPanX = 0.0;
+    double viewPanY = 0.0;
+    bool panning = false;
+    int panStartX = 0;
+    int panStartY = 0;
+    double panOriginX = 0.0;
+    double panOriginY = 0.0;
+    Image workingSource = prepareImage(source, settings.pixelSize);
+    std::vector<std::uint8_t> dithered = ditherImage(workingSource, settings);
     Pixmap backBuffer = createBackBuffer(display, window, windowWidth, windowHeight, depth);
     std::mutex importMutex;
     std::optional<std::string> finishedImportPath;
@@ -884,8 +558,10 @@ int main(int argc, char** argv) {
     };
 
     const auto redraw = [&]() {
+        palette = makePalette(display, screen, settings.theme);
         if (dirty) {
-            dithered = ditherImage(source, settings);
+            workingSource = prepareImage(source, settings.pixelSize);
+            dithered = ditherImage(workingSource, settings);
             dirty = false;
         }
 
@@ -894,62 +570,89 @@ int main(int argc, char** argv) {
         }
         backBuffer = createBackBuffer(display, window, windowWidth, windowHeight, depth);
 
-        layoutControls(sliders, buttons, windowWidth);
+        layoutControls(sliders, buttons, windowWidth, settings.activeTab);
 
         fillRect(display, backBuffer, gc, Rect{0, 0, windowWidth, windowHeight}, palette.background);
         fillRect(display, backBuffer, gc, Rect{windowWidth - kPanelWidth, 0, kPanelWidth, windowHeight}, palette.panel);
         fillRect(display, backBuffer, gc, Rect{windowWidth - kPanelWidth - 1, 0, 1, windowHeight}, palette.border);
 
-        drawText(display, backBuffer, gc, kMargin, 24, "OpenDither - black and white preview", palette.text);
-        drawText(display, backBuffer, gc, windowWidth - kPanelWidth + kMargin, 24, settings.activeTab == SideTab::Colors ? "Color Settings" : "Dither Settings", palette.text);
+        drawText(display, backBuffer, gc, kMargin, 24, "OpenDither", palette.text);
+        const Rect themeToggle{windowWidth - kPanelWidth + kMargin, 20, 86, 28};
+        drawToggle(display, backBuffer, gc, palette, themeToggle, settings.theme == Theme::Dark ? "Dark" : "Light", settings.theme == Theme::Dark);
+        drawText(display, backBuffer, gc, themeToggle.x + 96, 39, "Theme", palette.mutedText);
 
-        const int previewX = kMargin;
-        const PreviewLayout previewLayout = computePreviewLayout(source, settings.scale, windowWidth, windowHeight);
-        drawPreview(display, backBuffer, gc, visual, source, dithered, settings, previewMode, previewLayout.x, previewLayout.y, previewLayout.width, previewLayout.height);
-
-        drawText(display, backBuffer, gc, previewX, previewLayout.y + previewLayout.height + 22, std::string("Formula: ") + formulaName(settings.formula), palette.fill);
+        const PreviewLayout previewLayout = computePreviewLayout(windowWidth, windowHeight);
+        fillRect(display, backBuffer, gc, Rect{previewLayout.x - 1, previewLayout.y - 1, previewLayout.width + 2, previewLayout.height + 2}, palette.border);
+        fillRect(display, backBuffer, gc, Rect{previewLayout.x, previewLayout.y, previewLayout.width, previewLayout.height}, palette.panel);
+        drawPreview(display, backBuffer, gc, visual, workingSource, dithered, settings, previewMode, previewLayout, viewPanX, viewPanY);
 
         const Rect importButton{previewLayout.x, previewLayout.y + previewLayout.height + 8, 92, 28};
         const Rect flipButton{previewLayout.x + 100, previewLayout.y + previewLayout.height + 8, 156, 28};
         drawToggle(display, backBuffer, gc, palette, importButton, "Import");
-        drawToggle(display, backBuffer, gc, palette, flipButton, previewMode == PreviewMode::Dithered ? "Showing: Dithered" : "Showing: Original");
+        drawToggle(display, backBuffer, gc, palette, flipButton, previewMode == PreviewMode::Dithered ? "Dithered" : "Original");
 
-        drawPixelSizeControl(display, backBuffer, gc, palette, windowWidth, settings.scale);
+        drawStepControl(display, backBuffer, gc, palette, windowWidth, 64, "Zoom", settings.scale, "x");
+        drawStepControl(display, backBuffer, gc, palette, windowWidth, 116, "Pixel Size", settings.pixelSize, "px");
 
         const int panelX = windowWidth - kPanelWidth + kMargin;
-        const Rect colorsTab{panelX, 104, 86, 28};
-        const Rect ditherTab{panelX + 92, 104, 102, 28};
+        const Rect colorsTab{panelX, 170, 122, 28};
+        const Rect ditherTab{panelX + 130, 170, 122, 28};
         drawTab(display, backBuffer, gc, palette, colorsTab, "Colors", settings.activeTab == SideTab::Colors);
         drawTab(display, backBuffer, gc, palette, ditherTab, "Dither", settings.activeTab == SideTab::Dither);
 
         if (settings.activeTab == SideTab::Colors) {
-            drawText(display, backBuffer, gc, panelX, 150, "Color Mode", palette.text);
-            const std::array<ColorMode, 5> modes{
-                ColorMode::Monochrome,
-                ColorMode::Palette,
-                ColorMode::HorizontalGradient,
-                ColorMode::VerticalGradient,
-                ColorMode::RadialGradient,
-            };
-            for (std::size_t i = 0; i < modes.size(); ++i) {
-                const Rect modeRect{panelX, 166 + static_cast<int>(i) * 34, 190, 28};
-                drawColorModeButton(display, backBuffer, gc, palette, modeRect, colorModeName(modes[i]), settings.colorMode == modes[i]);
+            drawText(display, backBuffer, gc, panelX, 226, "Channels", palette.text);
+            const std::array<int, 3> channelCounts{2, 3, 4};
+            for (std::size_t i = 0; i < channelCounts.size(); ++i) {
+                const Rect channelRect{panelX + static_cast<int>(i) * 74, 242, 66, 28};
+                drawModeButton(display, backBuffer, gc, palette, channelRect, std::to_string(channelCounts[i]), settings.channelCount == channelCounts[i]);
             }
 
-            drawText(display, backBuffer, gc, panelX, 346, "Colors", palette.text);
-            for (std::size_t i = 0; i < settings.colors.size(); ++i) {
-                const int rowY = 362 + static_cast<int>(i) * 36;
-                const Rect swatch{panelX, rowY, kSwatchSize, kSwatchSize};
-                const Rect choose{panelX + 40, rowY + 2, 110, 24};
-                drawSwatch(display, backBuffer, gc, palette, swatch, settings.colors[i], static_cast<int>(i) == settings.selectedColorIndex);
-                drawToggle(display, backBuffer, gc, palette, choose, colorToHex(settings.colors[i]));
+            const int stripY = 286;
+            const int cardGap = 8;
+            const int cardWidth = (kPanelWidth - 2 * kMargin - static_cast<int>(cardGap * 3)) / std::max(1, settings.channelCount);
+            for (int i = 0; i < settings.channelCount; ++i) {
+                const int cardX = panelX + i * (cardWidth + cardGap);
+                const Rect card{cardX, stripY, cardWidth, 56};
+                fillRect(display, backBuffer, gc, card, i == settings.selectedChannel ? palette.buttonActive : palette.button);
+                drawText(display, backBuffer, gc, card.x + 8, card.y + 18, "C" + std::to_string(i + 1), i == settings.selectedChannel ? palette.buttonActiveText : palette.buttonText);
+                drawSwatch(display, backBuffer, gc, palette, Rect{card.x + 8, card.y + 26, 22, 22}, settings.colors[static_cast<std::size_t>(i)], false);
+                drawText(display, backBuffer, gc, card.x + 34, card.y + 43, settings.channelModes[static_cast<std::size_t>(i)] == ChannelMode::Solid ? "S" : "G", palette.mutedText);
             }
 
-            const int colorButtonsY = 362 + static_cast<int>(settings.colors.size()) * 36 + 10;
-            const Rect addColor{panelX, colorButtonsY, 92, 28};
-            const Rect removeColor{panelX + 100, colorButtonsY, 92, 28};
-            drawToggle(display, backBuffer, gc, palette, addColor, "Add Color");
-            drawToggle(display, backBuffer, gc, palette, removeColor, "Remove");
+            const std::size_t idx = static_cast<std::size_t>(settings.selectedChannel);
+            const int detailY = 356;
+            drawText(display, backBuffer, gc, panelX, detailY, "Selected Channel", palette.text);
+            const Rect solidButton{panelX, detailY + 18, 88, 28};
+            const Rect gradientButton{panelX + 96, detailY + 18, 96, 28};
+            drawModeButton(display, backBuffer, gc, palette, solidButton, "Solid", settings.channelModes[idx] == ChannelMode::Solid);
+            drawModeButton(display, backBuffer, gc, palette, gradientButton, "Grad", settings.channelModes[idx] == ChannelMode::Gradient);
+
+            if (settings.channelModes[idx] == ChannelMode::Solid) {
+                const Rect colorA{panelX, detailY + 68, kSwatchSize, kSwatchSize};
+                const Rect colorAButton{panelX + 36, detailY + 70, 150, 24};
+                drawSwatch(display, backBuffer, gc, palette, colorA, settings.colors[idx], true);
+                drawToggle(display, backBuffer, gc, palette, colorAButton, colorToHex(settings.colors[idx]));
+            } else {
+                const Rect colorA{panelX, detailY + 68, kSwatchSize, kSwatchSize};
+                const Rect colorAButton{panelX + 36, detailY + 70, 150, 24};
+                const Rect colorB{panelX, detailY + 104, kSwatchSize, kSwatchSize};
+                const Rect colorBButton{panelX + 36, detailY + 106, 150, 24};
+                drawSwatch(display, backBuffer, gc, palette, colorA, settings.colors[idx], true);
+                drawToggle(display, backBuffer, gc, palette, colorAButton, colorToHex(settings.colors[idx]));
+                drawSwatch(display, backBuffer, gc, palette, colorB, settings.gradientColors[idx], true);
+                drawToggle(display, backBuffer, gc, palette, colorBButton, colorToHex(settings.gradientColors[idx]));
+
+                const Rect horiz{panelX, detailY + 144, 60, 28};
+                const Rect vert{panelX + 68, detailY + 144, 60, 28};
+                const Rect rad{panelX + 136, detailY + 144, 60, 28};
+                drawModeButton(display, backBuffer, gc, palette, horiz, "H", settings.gradientTypes[idx] == GradientType::Horizontal);
+                drawModeButton(display, backBuffer, gc, palette, vert, "V", settings.gradientTypes[idx] == GradientType::Vertical);
+                drawModeButton(display, backBuffer, gc, palette, rad, "R", settings.gradientTypes[idx] == GradientType::Radial);
+
+                const Rect gradientSlider{panelX, detailY + 196, 290, 18};
+                drawMiniSlider(display, backBuffer, gc, palette, gradientSlider, "Blend Width", settings.gradientSpread[idx], 0.05, 1.0);
+            }
         } else {
             for (const Slider& slider : sliders) {
                 drawSlider(display, backBuffer, gc, palette, slider);
@@ -986,7 +689,11 @@ int main(int argc, char** argv) {
 
             if (importedPath.has_value()) {
                 importImageFromPath(*importedPath, source, settings, dithered, dirty, needsRedraw);
+                ensureChannelCount(settings);
                 sliders = makeSliders(settings);
+                palette = makePalette(display, screen, settings.theme);
+                viewPanX = 0.0;
+                viewPanY = 0.0;
                 previewMode = PreviewMode::Original;
             }
         }
@@ -1002,11 +709,36 @@ int main(int argc, char** argv) {
                 windowHeight = event.xconfigure.height;
                 needsRedraw = true;
             } else if (event.type == ButtonPress) {
-                layoutControls(sliders, buttons, windowWidth);
+                if (event.xbutton.button == Button4) {
+                    settings.scale = std::min(16, settings.scale + 1);
+                    needsRedraw = true;
+                    continue;
+                }
+                if (event.xbutton.button == Button5) {
+                    settings.scale = std::max(1, settings.scale - 1);
+                    needsRedraw = true;
+                    continue;
+                }
+
+                layoutControls(sliders, buttons, windowWidth, settings.activeTab);
                 activeSlider = -1;
                 const int panelX = windowWidth - kPanelWidth + kMargin;
-                const Rect colorsTab{panelX, 104, 86, 28};
-                const Rect ditherTab{panelX + 92, 104, 102, 28};
+                const Rect themeToggle{panelX, 20, 86, 28};
+                const Rect zoomMinus{panelX, 78, 38, 26};
+                const Rect zoomPlus{panelX + 52, 78, 38, 26};
+                const Rect pixelMinus{panelX, 130, 38, 26};
+                const Rect pixelPlus{panelX + 52, 130, 38, 26};
+                const Rect colorsTab{panelX, 170, 122, 28};
+                const Rect ditherTab{panelX + 130, 170, 122, 28};
+                const PreviewLayout previewLayout = computePreviewLayout(windowWidth, windowHeight);
+                const Rect previewRect{previewLayout.x, previewLayout.y, previewLayout.width, previewLayout.height};
+                const Rect importButton{previewLayout.x, previewLayout.y + previewLayout.height + 8, 92, 28};
+                const Rect flipButton{previewLayout.x + 100, previewLayout.y + previewLayout.height + 8, 156, 28};
+
+                if (themeToggle.contains(event.xbutton.x, event.xbutton.y)) {
+                    settings.theme = settings.theme == Theme::Dark ? Theme::Light : Theme::Dark;
+                    needsRedraw = true;
+                }
                 if (colorsTab.contains(event.xbutton.x, event.xbutton.y)) {
                     settings.activeTab = SideTab::Colors;
                     needsRedraw = true;
@@ -1016,26 +748,42 @@ int main(int argc, char** argv) {
                     needsRedraw = true;
                 }
 
-                const Rect minus{windowWidth - kPanelWidth + kMargin, 78, 38, 26};
-                const Rect plus{windowWidth - kPanelWidth + kMargin + 52, 78, 38, 26};
-                if (minus.contains(event.xbutton.x, event.xbutton.y)) {
+                if (zoomMinus.contains(event.xbutton.x, event.xbutton.y)) {
                     settings.scale = std::max(1, settings.scale - 1);
                     needsRedraw = true;
                 }
-                if (plus.contains(event.xbutton.x, event.xbutton.y)) {
-                    settings.scale = std::min(8, settings.scale + 1);
+                if (zoomPlus.contains(event.xbutton.x, event.xbutton.y)) {
+                    settings.scale = std::min(16, settings.scale + 1);
                     needsRedraw = true;
                 }
 
-                const PreviewLayout previewLayout = computePreviewLayout(source, settings.scale, windowWidth, windowHeight);
-                const Rect importButton{previewLayout.x, previewLayout.y + previewLayout.height + 8, 92, 28};
-                const Rect flipButton{previewLayout.x + 100, previewLayout.y + previewLayout.height + 8, 156, 28};
+                if (pixelMinus.contains(event.xbutton.x, event.xbutton.y)) {
+                    settings.pixelSize = std::max(1, settings.pixelSize - 1);
+                    dirty = true;
+                    needsRedraw = true;
+                }
+                if (pixelPlus.contains(event.xbutton.x, event.xbutton.y)) {
+                    settings.pixelSize = std::min(8, settings.pixelSize + 1);
+                    dirty = true;
+                    needsRedraw = true;
+                }
+
                 if (importButton.contains(event.xbutton.x, event.xbutton.y)) {
                     startImport();
                 }
                 if (flipButton.contains(event.xbutton.x, event.xbutton.y)) {
                     previewMode = previewMode == PreviewMode::Dithered ? PreviewMode::Original : PreviewMode::Dithered;
                     needsRedraw = true;
+                }
+
+                if (previewRect.contains(event.xbutton.x, event.xbutton.y) &&
+                    !importButton.contains(event.xbutton.x, event.xbutton.y) &&
+                    !flipButton.contains(event.xbutton.x, event.xbutton.y)) {
+                    panning = true;
+                    panStartX = event.xbutton.x;
+                    panStartY = event.xbutton.y;
+                    panOriginX = viewPanX;
+                    panOriginY = viewPanY;
                 }
 
                 if (settings.activeTab == SideTab::Dither) {
@@ -1056,46 +804,83 @@ int main(int argc, char** argv) {
                         }
                     }
                 } else {
-                const std::array<ColorMode, 5> modes{
-                    ColorMode::Monochrome,
-                    ColorMode::Palette,
-                    ColorMode::HorizontalGradient,
-                    ColorMode::VerticalGradient,
-                    ColorMode::RadialGradient,
-                };
-                for (std::size_t i = 0; i < modes.size(); ++i) {
-                    const Rect modeRect{panelX, 166 + static_cast<int>(i) * 34, 190, 28};
-                    if (modeRect.contains(event.xbutton.x, event.xbutton.y)) {
-                        settings.colorMode = modes[i];
-                        needsRedraw = true;
-                    }
-                }
-
-                for (std::size_t i = 0; i < settings.colors.size(); ++i) {
-                    const int rowY = 362 + static_cast<int>(i) * 36;
-                    const Rect swatch{panelX, rowY, kSwatchSize, kSwatchSize};
-                    const Rect choose{panelX + 40, rowY + 2, 110, 24};
-                    if (swatch.contains(event.xbutton.x, event.xbutton.y) || choose.contains(event.xbutton.x, event.xbutton.y)) {
-                        settings.selectedColorIndex = static_cast<int>(i);
-                        if (auto picked = chooseColor(settings.colors[i])) {
-                            settings.colors[i] = *picked;
+                    const std::array<int, 3> channelCounts{2, 3, 4};
+                    for (std::size_t i = 0; i < channelCounts.size(); ++i) {
+                        const Rect channelRect{panelX + static_cast<int>(i) * 74, 242, 66, 28};
+                        if (channelRect.contains(event.xbutton.x, event.xbutton.y)) {
+                            settings.channelCount = channelCounts[i];
+                            ensureChannelCount(settings);
+                            dirty = true;
+                            needsRedraw = true;
                         }
-                        needsRedraw = true;
                     }
-                }
 
-                    const int colorButtonsY = 362 + static_cast<int>(settings.colors.size()) * 36 + 10;
-                    const Rect addColor{panelX, colorButtonsY, 92, 28};
-                    const Rect removeColor{panelX + 100, colorButtonsY, 92, 28};
-                    if (addColor.contains(event.xbutton.x, event.xbutton.y)) {
-                        settings.colors.push_back(settings.colors.empty() ? Pixel{0, 0, 0} : settings.colors.back());
-                        settings.selectedColorIndex = static_cast<int>(settings.colors.size()) - 1;
+                    const int stripY = 286;
+                    const int cardGap = 8;
+                    const int cardWidth = (kPanelWidth - 2 * kMargin - static_cast<int>(cardGap * 3)) / std::max(1, settings.channelCount);
+                    for (int i = 0; i < settings.channelCount; ++i) {
+                        const int cardX = panelX + i * (cardWidth + cardGap);
+                        const Rect card{cardX, stripY, cardWidth, 56};
+                        if (card.contains(event.xbutton.x, event.xbutton.y)) {
+                            settings.selectedChannel = i;
+                            needsRedraw = true;
+                        }
+                    }
+
+                    const std::size_t idx = static_cast<std::size_t>(settings.selectedChannel);
+                    const int detailY = 356;
+                    const Rect solidButton{panelX, detailY + 18, 88, 28};
+                    const Rect gradientButton{panelX + 96, detailY + 18, 96, 28};
+                    if (solidButton.contains(event.xbutton.x, event.xbutton.y)) {
+                        settings.channelModes[idx] = ChannelMode::Solid;
                         needsRedraw = true;
                     }
-                    if (removeColor.contains(event.xbutton.x, event.xbutton.y) && settings.colors.size() > 2) {
-                        settings.colors.pop_back();
-                        settings.selectedColorIndex = std::min(settings.selectedColorIndex, static_cast<int>(settings.colors.size()) - 1);
+                    if (gradientButton.contains(event.xbutton.x, event.xbutton.y)) {
+                        settings.channelModes[idx] = ChannelMode::Gradient;
                         needsRedraw = true;
+                    }
+
+                    const Rect colorA{panelX, detailY + 68, kSwatchSize, kSwatchSize};
+                    const Rect colorAButton{panelX + 36, detailY + 70, 150, 24};
+                    if (colorA.contains(event.xbutton.x, event.xbutton.y) || colorAButton.contains(event.xbutton.x, event.xbutton.y)) {
+                        if (auto picked = chooseColor(settings.colors[idx])) {
+                            settings.colors[idx] = *picked;
+                            needsRedraw = true;
+                        }
+                    }
+
+                    if (settings.channelModes[idx] == ChannelMode::Gradient) {
+                        const Rect colorB{panelX, detailY + 104, kSwatchSize, kSwatchSize};
+                        const Rect colorBButton{panelX + 36, detailY + 106, 150, 24};
+                        if (colorB.contains(event.xbutton.x, event.xbutton.y) || colorBButton.contains(event.xbutton.x, event.xbutton.y)) {
+                            if (auto picked = chooseColor(settings.gradientColors[idx])) {
+                                settings.gradientColors[idx] = *picked;
+                                needsRedraw = true;
+                            }
+                        }
+
+                        const Rect horiz{panelX, detailY + 144, 60, 28};
+                        const Rect vert{panelX + 68, detailY + 144, 60, 28};
+                        const Rect rad{panelX + 136, detailY + 144, 60, 28};
+                        if (horiz.contains(event.xbutton.x, event.xbutton.y)) {
+                            settings.gradientTypes[idx] = GradientType::Horizontal;
+                            needsRedraw = true;
+                        }
+                        if (vert.contains(event.xbutton.x, event.xbutton.y)) {
+                            settings.gradientTypes[idx] = GradientType::Vertical;
+                            needsRedraw = true;
+                        }
+                        if (rad.contains(event.xbutton.x, event.xbutton.y)) {
+                            settings.gradientTypes[idx] = GradientType::Radial;
+                            needsRedraw = true;
+                        }
+
+                        const Rect gradientSlider{panelX, detailY + 196, 290, 18};
+                        if (gradientSlider.contains(event.xbutton.x, event.xbutton.y)) {
+                            const double t = clampDouble(static_cast<double>(event.xbutton.x - gradientSlider.x) / gradientSlider.w, 0.0, 1.0);
+                            settings.gradientSpread[idx] = 0.05 + t * (1.0 - 0.05);
+                            needsRedraw = true;
+                        }
                     }
                 }
             } else if (event.type == MotionNotify && activeSlider >= 0) {
@@ -1105,15 +890,38 @@ int main(int argc, char** argv) {
                     dirty = true;
                     needsRedraw = true;
                 }
+            } else if (event.type == MotionNotify && panning && (event.xmotion.state & Button1Mask)) {
+                const PreviewLayout previewLayout = computePreviewLayout(windowWidth, windowHeight);
+                const double zoomScale = previewScaleForLayout(workingSource, previewLayout, settings.scale);
+                viewPanX = panOriginX - static_cast<double>(event.xmotion.x - panStartX) / std::max(0.0001, zoomScale);
+                viewPanY = panOriginY - static_cast<double>(event.xmotion.y - panStartY) / std::max(0.0001, zoomScale);
+                needsRedraw = true;
+            } else if (event.type == MotionNotify && settings.activeTab == SideTab::Colors && (event.xmotion.state & Button1Mask)) {
+                const int panelX = windowWidth - kPanelWidth + kMargin;
+                const int detailY = 356;
+                const std::size_t idx = static_cast<std::size_t>(settings.selectedChannel);
+                if (settings.channelModes[idx] == ChannelMode::Gradient) {
+                    const Rect gradientSlider{panelX, detailY + 196, 290, 18};
+                    if (gradientSlider.contains(event.xmotion.x, event.xmotion.y)) {
+                        const double t = clampDouble(static_cast<double>(event.xmotion.x - gradientSlider.x) / gradientSlider.w, 0.0, 1.0);
+                        settings.gradientSpread[idx] = 0.05 + t * (1.0 - 0.05);
+                        needsRedraw = true;
+                    }
+                }
             } else if (event.type == ButtonRelease) {
                 activeSlider = -1;
+                panning = false;
             } else if (event.type == KeyPress) {
                 const KeySym key = XLookupKeysym(&event.xkey, 0);
                 if (key == XK_Escape) {
                     running = false;
                 } else if (key == XK_r || key == XK_R) {
                     settings = Settings{};
+                    ensureChannelCount(settings);
                     sliders = makeSliders(settings);
+                    palette = makePalette(display, screen, settings.theme);
+                    viewPanX = 0.0;
+                    viewPanY = 0.0;
                     dirty = true;
                     needsRedraw = true;
                 } else if (key == XK_space) {
@@ -1122,8 +930,12 @@ int main(int argc, char** argv) {
                 } else if (key == XK_i || key == XK_I) {
                     startImport();
                 } else if (key == XK_s || key == XK_S) {
-                    dithered = ditherImage(source, settings);
-                    if (savePpm("opendither-output.ppm", source, dithered)) {
+                    if (dirty) {
+                        workingSource = prepareImage(source, settings.pixelSize);
+                        dithered = ditherImage(workingSource, settings);
+                        dirty = false;
+                    }
+                    if (savePpm("opendither-output.ppm", workingSource, dithered, std::clamp(settings.channelCount, 2, 4))) {
                         std::cout << "Saved opendither-output.ppm\n";
                     }
                 }

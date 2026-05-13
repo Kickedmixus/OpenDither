@@ -9,6 +9,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(X11 REQUIRED)
 
 add_executable(opendither
+    src/core.cpp
     src/main.cpp
 )
 
