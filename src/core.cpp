@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -11,7 +12,18 @@
 #include <optional>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <io.h>
+#else
 #include <unistd.h>
+#endif
+
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "../third_party/stb/stb_image.h"
+#include "../third_party/stb/stb_image_write.h"
 
 namespace {
 
@@ -23,32 +35,21 @@ std::uint8_t toByte(double value) {
     return static_cast<std::uint8_t>(std::lround(clampDouble(value, 0.0, 255.0)));
 }
 
-std::string shellQuote(const std::string& value) {
-    std::string quoted = "'";
-    for (char ch : value) {
-        if (ch == '\'') {
-            quoted += "'\\''";
-        } else {
-            quoted += ch;
-        }
+#ifdef _WIN32
+std::wstring utf8ToWide(const std::string& value) {
+    if (value.empty()) {
+        return {};
     }
-    quoted += "'";
-    return quoted;
+    const int required = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.c_str(), static_cast<int>(value.size()), nullptr, 0);
+    if (required <= 0) {
+        return {};
+    }
+    std::wstring output(static_cast<std::size_t>(required), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, value.c_str(), static_cast<int>(value.size()), output.data(), required);
+    return output;
 }
 
-std::optional<std::filesystem::path> makeTempPpmPath() {
-    std::filesystem::path templatePath = std::filesystem::temp_directory_path() / "opendither-import-XXXXXX.ppm";
-    std::string temp = templatePath.string();
-    std::vector<char> buffer(temp.begin(), temp.end());
-    buffer.push_back('\0');
-
-    int fd = mkstemps(buffer.data(), 4);
-    if (fd == -1) {
-        return std::nullopt;
-    }
-    close(fd);
-    return std::filesystem::path(buffer.data());
-}
+#endif
 
 std::string readToken(std::istream& input) {
     std::string token;
@@ -183,6 +184,34 @@ Image prepareImage(const Image& input, int pixelSize) {
     return output;
 }
 
+Image buildExportImage(const Image& input, const std::vector<std::uint8_t>& dithered, const Settings& settings, PreviewMode mode, int exportScale) {
+    const int scale = std::max(1, exportScale);
+    if (input.width <= 0 || input.height <= 0 || input.pixels.empty()) {
+        return {};
+    }
+
+    Image output;
+    output.width = input.width * scale;
+    output.height = input.height * scale;
+    output.pixels.resize(static_cast<std::size_t>(output.width * output.height));
+
+    for (int y = 0; y < output.height; ++y) {
+        const int sourceY = std::min(input.height - 1, y / scale);
+        for (int x = 0; x < output.width; ++x) {
+            const int sourceX = std::min(input.width - 1, x / scale);
+            const std::size_t index = static_cast<std::size_t>(sourceY * input.width + sourceX);
+            Pixel outputPixel = input.pixels[index];
+            if (mode == PreviewMode::Dithered) {
+                const int level = std::min<int>(dithered[index], settings.channelCount - 1);
+                outputPixel = channelColor(input, settings, level, sourceX, sourceY);
+            }
+            output.pixels[static_cast<std::size_t>(y * output.width + x)] = outputPixel;
+        }
+    }
+
+    return output;
+}
+
 std::optional<Image> loadPpm(const std::string& path) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
@@ -235,19 +264,44 @@ std::optional<Image> loadImageAny(const std::string& path) {
         return ppm;
     }
 
-    const auto tempPath = makeTempPpmPath();
-    if (!tempPath) {
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    unsigned char* data = nullptr;
+
+#ifdef _WIN32
+    const std::wstring widePath = utf8ToWide(path);
+    if (widePath.empty()) {
         return std::nullopt;
     }
 
-    const std::string command = "ffmpeg -y -hide_banner -loglevel error -i " + shellQuote(path) + " -frames:v 1 -f image2 -vcodec ppm " + shellQuote(tempPath->string());
-    if (std::system(command.c_str()) != 0) {
-        std::filesystem::remove(*tempPath);
+    FILE* file = _wfopen(widePath.c_str(), L"rb");
+    if (!file) {
+        return std::nullopt;
+    }
+    data = stbi_load_from_file(file, &width, &height, &channels, 3);
+    std::fclose(file);
+#else
+    data = stbi_load(path.c_str(), &width, &height, &channels, 3);
+#endif
+
+    if (!data || width <= 0 || height <= 0) {
+        stbi_image_free(data);
         return std::nullopt;
     }
 
-    std::optional<Image> image = loadPpm(tempPath->string());
-    std::filesystem::remove(*tempPath);
+    Image image;
+    image.width = width;
+    image.height = height;
+    image.pixels.resize(static_cast<std::size_t>(width * height));
+    for (std::size_t i = 0; i < image.pixels.size(); ++i) {
+        image.pixels[i] = Pixel{
+            data[i * 3 + 0],
+            data[i * 3 + 1],
+            data[i * 3 + 2],
+        };
+    }
+    stbi_image_free(data);
     return image;
 }
 
@@ -365,6 +419,80 @@ bool savePpm(const std::string& path, const Image& image, const std::vector<std:
         file.write(&byte, 1);
     }
     return true;
+}
+
+bool exportImage(const std::string& path, const Image& input, const std::vector<std::uint8_t>& dithered, const Settings& settings, PreviewMode mode, int exportScale) {
+    const Image exportImageData = buildExportImage(input, dithered, settings, mode, exportScale);
+    if (exportImageData.width <= 0 || exportImageData.height <= 0 || exportImageData.pixels.empty()) {
+        return false;
+    }
+
+    const std::filesystem::path outputPath(path);
+    if (outputPath.extension() == ".ppm" || outputPath.extension() == ".pnm") {
+        std::ofstream file(path, std::ios::binary);
+        if (!file) {
+            return false;
+        }
+
+        file << "P6\n" << exportImageData.width << " " << exportImageData.height << "\n255\n";
+        for (const Pixel& pixel : exportImageData.pixels) {
+            const char r = static_cast<char>(pixel.r);
+            const char g = static_cast<char>(pixel.g);
+            const char b = static_cast<char>(pixel.b);
+            file.write(&r, 1);
+            file.write(&g, 1);
+            file.write(&b, 1);
+        }
+        return true;
+    }
+
+    auto writeFunc = [](void* context, void* data, int size) {
+        auto* file = static_cast<std::FILE*>(context);
+        std::fwrite(data, 1, static_cast<std::size_t>(size), file);
+    };
+
+    const int stride = exportImageData.width * 3;
+    std::vector<std::uint8_t> packed(static_cast<std::size_t>(stride * exportImageData.height), 0);
+    for (int y = 0; y < exportImageData.height; ++y) {
+        for (int x = 0; x < exportImageData.width; ++x) {
+            const Pixel& pixel = exportImageData.pixels[static_cast<std::size_t>(y * exportImageData.width + x)];
+            const std::size_t index = static_cast<std::size_t>(y * stride + x * 3);
+            packed[index + 0] = pixel.r;
+            packed[index + 1] = pixel.g;
+            packed[index + 2] = pixel.b;
+        }
+    }
+
+#ifdef _WIN32
+    const std::wstring widePath = utf8ToWide(path);
+    if (widePath.empty()) {
+        return false;
+    }
+    FILE* file = _wfopen(widePath.c_str(), L"wb");
+#else
+    FILE* file = std::fopen(path.c_str(), "wb");
+#endif
+
+    if (!file) {
+        return false;
+    }
+
+    const std::string ext = outputPath.extension().string();
+    bool ok = false;
+    if (ext == ".png") {
+        ok = stbi_write_png_to_func(writeFunc, file, exportImageData.width, exportImageData.height, 3, packed.data(), stride) != 0;
+    } else if (ext == ".jpg" || ext == ".jpeg") {
+        ok = stbi_write_jpg_to_func(writeFunc, file, exportImageData.width, exportImageData.height, 3, packed.data(), 90) != 0;
+    } else if (ext == ".bmp") {
+        ok = stbi_write_bmp_to_func(writeFunc, file, exportImageData.width, exportImageData.height, 3, packed.data()) != 0;
+    } else if (ext == ".tga") {
+        ok = stbi_write_tga_to_func(writeFunc, file, exportImageData.width, exportImageData.height, 3, packed.data()) != 0;
+    } else {
+        ok = stbi_write_png_to_func(writeFunc, file, exportImageData.width, exportImageData.height, 3, packed.data(), stride) != 0;
+    }
+
+    std::fclose(file);
+    return ok;
 }
 
 void ensureChannelCount(Settings& settings) {

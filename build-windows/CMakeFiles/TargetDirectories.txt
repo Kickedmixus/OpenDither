@@ -1,0 +1,3 @@
+/home/mixus/Documents/githubabic/OpenDither/build-windows/CMakeFiles/opendither.dir
+/home/mixus/Documents/githubabic/OpenDither/build-windows/CMakeFiles/edit_cache.dir
+/home/mixus/Documents/githubabic/OpenDither/build-windows/CMakeFiles/rebuild_cache.dir

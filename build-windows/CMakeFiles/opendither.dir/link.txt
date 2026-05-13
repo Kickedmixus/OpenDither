@@ -1,0 +1,3 @@
+/usr/bin/cmake -E rm -f CMakeFiles/opendither.dir/objects.a
+/tmp/llvm-mingw/llvm-mingw-20260505-msvcrt-ubuntu-22.04-x86_64/bin/x86_64-w64-mingw32-llvm-ar qc CMakeFiles/opendither.dir/objects.a @CMakeFiles/opendither.dir/objects1.rsp
+/tmp/llvm-mingw/llvm-mingw-20260505-msvcrt-ubuntu-22.04-x86_64/bin/x86_64-w64-mingw32-clang++ -mwindows -Wl,--whole-archive CMakeFiles/opendither.dir/objects.a -Wl,--no-whole-archive -o opendither.exe -Wl,--out-implib,libopendither.dll.a -Wl,--major-image-version,0,--minor-image-version,0 @CMakeFiles/opendither.dir/linkLibs.rsp

@@ -63,6 +63,7 @@ struct Settings {
     Theme theme = Theme::Dark;
     int channelCount = 2;
     int selectedChannel = 0;
+    int exportScale = 1;
     std::vector<Pixel> colors;
     std::vector<Pixel> gradientColors;
     std::vector<ChannelMode> channelModes;
@@ -74,10 +75,12 @@ struct Settings {
 
 Image makeDemoImage();
 Image prepareImage(const Image& input, int pixelSize);
+Image buildExportImage(const Image& input, const std::vector<std::uint8_t>& dithered, const Settings& settings, PreviewMode mode, int exportScale);
 std::optional<Image> loadPpm(const std::string& path);
 std::optional<Image> loadImageAny(const std::string& path);
 std::vector<std::uint8_t> ditherImage(const Image& input, const Settings& settings);
 bool savePpm(const std::string& path, const Image& image, const std::vector<std::uint8_t>& dithered, int levels);
+bool exportImage(const std::string& path, const Image& input, const std::vector<std::uint8_t>& dithered, const Settings& settings, PreviewMode mode, int exportScale);
 void ensureChannelCount(Settings& settings);
 double gradientMixForType(GradientType type, const Image& source, int sourceX, int sourceY, double spread);
 Pixel lerpColor(const Pixel& a, const Pixel& b, double t);

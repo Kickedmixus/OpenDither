@@ -188,6 +188,46 @@ std::optional<std::string> chooseImagePath() {
     return path;
 }
 
+std::optional<std::string> chooseExportPath() {
+    const char* command =
+        "zenity --file-selection --save --confirm-overwrite "
+        "--title='Save export' "
+        "--filename=\"$HOME/opendither.png\" "
+        "--file-filter='PNG image | *.png' "
+        "--file-filter='JPEG image | *.jpg *.jpeg' "
+        "--file-filter='BMP image | *.bmp' "
+        "--file-filter='WebP image | *.webp' "
+        "--file-filter='GIF image | *.gif' "
+        "--file-filter='TIFF image | *.tif *.tiff' "
+        "--file-filter='PPM image | *.ppm *.pnm' "
+        "--file-filter='All files | *'";
+    FILE* pipe = popen(command, "r");
+    if (!pipe) {
+        return std::nullopt;
+    }
+
+    std::string path;
+    char buffer[512];
+    while (std::fgets(buffer, sizeof(buffer), pipe)) {
+        path += buffer;
+    }
+
+    const int status = pclose(pipe);
+    if (status != 0) {
+        return std::nullopt;
+    }
+
+    while (!path.empty() && (path.back() == '\n' || path.back() == '\r')) {
+        path.pop_back();
+    }
+
+    if (path.empty()) {
+        return std::nullopt;
+    }
+
+    return path;
+}
+
 std::string colorToHex(const Pixel& color) {
     char buffer[16];
     std::snprintf(buffer, sizeof(buffer), "#%02X%02X%02X", color.r, color.g, color.b);
@@ -283,6 +323,7 @@ std::vector<Button> makeButtons() {
 }
 
 void layoutControls(std::vector<Slider>& sliders, std::vector<Button>& buttons, int windowWidth, SideTab activeTab) {
+    (void)activeTab;
     const int panelX = windowWidth - kPanelWidth + kMargin;
     int y = activeTab == SideTab::Dither ? 226 : 226;
     for (Slider& slider : sliders) {
@@ -329,12 +370,11 @@ void drawFooter(Display* display, Drawable drawable, GC gc, const Palette& palet
     drawText(display, drawable, gc, windowWidth - 170, windowHeight - 9, previewMode == PreviewMode::Dithered ? "View: dithered" : "View: original", palette.mutedText);
 }
 
-void drawStepControl(Display* display, Window window, GC gc, const Palette& palette, int windowWidth, int topY, const std::string& label, int value, const std::string& suffix) {
-    const int panelX = windowWidth - kPanelWidth + kMargin;
-    drawText(display, window, gc, panelX, topY, label, palette.text);
+void drawStepControl(Display* display, Window window, GC gc, const Palette& palette, int x, int topY, const std::string& label, int value, const std::string& suffix) {
+    drawText(display, window, gc, x, topY, label, palette.text);
 
-    const Rect minus{panelX, topY + 14, 38, 26};
-    const Rect plus{panelX + 52, topY + 14, 38, 26};
+    const Rect minus{x, topY + 14, 38, 26};
+    const Rect plus{x + 52, topY + 14, 38, 26};
     fillRect(display, window, gc, minus, palette.button);
     fillRect(display, window, gc, plus, palette.button);
     drawText(display, window, gc, minus.x + 14, minus.y + 18, "-", palette.buttonText);
@@ -380,7 +420,7 @@ PreviewLayout computePreviewLayout(int windowWidth, int windowHeight) {
     const int previewLeft = kMargin;
     const int previewTop = 44;
     const int previewRight = windowWidth - kPanelWidth - kMargin;
-    const int previewBottom = windowHeight - kFooterHeight - 60;
+    const int previewBottom = windowHeight - kFooterHeight - 104;
     const int maxPreviewWidth = std::max(1, previewRight - previewLeft);
     const int maxPreviewHeight = std::max(1, previewBottom - previewTop);
     return PreviewLayout{
@@ -453,18 +493,6 @@ void drawPreview(Display* display, Drawable drawable, GC gc, const Visual* visua
     XDestroyImage(image);
 }
 
-void importImageFromPath(const std::string& path, Image& source, Settings& settings, std::vector<std::uint8_t>& dithered, bool& dirty, bool& needsRedraw) {
-    if (auto loaded = loadImageAny(path)) {
-        source = *loaded;
-        dithered = ditherImage(source, settings);
-        dirty = false;
-        needsRedraw = true;
-        std::cout << "Loaded image: " << path << "\n";
-    } else {
-        std::cerr << "Could not load image: " << path << "\n";
-    }
-}
-
 Pixmap createBackBuffer(Display* display, Drawable drawable, int width, int height, int depth) {
     return XCreatePixmap(display, drawable, static_cast<unsigned int>(width), static_cast<unsigned int>(height), static_cast<unsigned int>(depth));
 }
@@ -534,6 +562,7 @@ int main(int argc, char** argv) {
     Pixmap backBuffer = createBackBuffer(display, window, windowWidth, windowHeight, depth);
     std::mutex importMutex;
     std::optional<std::string> finishedImportPath;
+    std::optional<Image> finishedImportImage;
     std::thread importThread;
 
     const auto startImport = [&]() {
@@ -546,24 +575,59 @@ int main(int argc, char** argv) {
         {
             std::lock_guard<std::mutex> lock(importMutex);
             finishedImportPath.reset();
+            finishedImportImage.reset();
         }
         importThread = std::thread([&]() {
             std::optional<std::string> selected = chooseImagePath();
+            std::optional<Image> loaded;
+            if (selected.has_value()) {
+                loaded = loadImageAny(*selected);
+            }
             {
                 std::lock_guard<std::mutex> lock(importMutex);
                 finishedImportPath = std::move(selected);
+                finishedImportImage = std::move(loaded);
             }
             importCompleted = true;
         });
     };
 
-    const auto redraw = [&]() {
-        palette = makePalette(display, screen, settings.theme);
+    const auto refreshWorkingImage = [&]() {
         if (dirty) {
             workingSource = prepareImage(source, settings.pixelSize);
             dithered = ditherImage(workingSource, settings);
             dirty = false;
         }
+    };
+
+    const auto performExport = [&]() {
+        refreshWorkingImage();
+        if (auto path = chooseExportPath()) {
+            if (exportImage(*path, workingSource, dithered, settings, previewMode, settings.exportScale)) {
+                std::cout << "Exported " << *path << "\n";
+            } else {
+                std::cerr << "Could not export image: " << *path << "\n";
+            }
+        }
+    };
+
+    const auto applyImportedImage = [&](Image loaded) {
+        source = std::move(loaded);
+        workingSource = prepareImage(source, settings.pixelSize);
+        dithered = ditherImage(workingSource, settings);
+        ensureChannelCount(settings);
+        sliders = makeSliders(settings);
+        palette = makePalette(display, screen, settings.theme);
+        viewPanX = 0.0;
+        viewPanY = 0.0;
+        previewMode = PreviewMode::Original;
+        dirty = false;
+        needsRedraw = true;
+    };
+
+    const auto redraw = [&]() {
+        palette = makePalette(display, screen, settings.theme);
+        refreshWorkingImage();
 
         if (backBuffer != None) {
             XFreePixmap(display, backBuffer);
@@ -586,15 +650,20 @@ int main(int argc, char** argv) {
         fillRect(display, backBuffer, gc, Rect{previewLayout.x, previewLayout.y, previewLayout.width, previewLayout.height}, palette.panel);
         drawPreview(display, backBuffer, gc, visual, workingSource, dithered, settings, previewMode, previewLayout, viewPanX, viewPanY);
 
-        const Rect importButton{previewLayout.x, previewLayout.y + previewLayout.height + 8, 92, 28};
-        const Rect flipButton{previewLayout.x + 100, previewLayout.y + previewLayout.height + 8, 156, 28};
+        const int actionRowY = previewLayout.y + previewLayout.height + 8;
+        const int actionRowX = previewLayout.x;
+        const Rect saveButton{actionRowX, actionRowY, 92, 28};
+        const Rect importButton{actionRowX + 104, actionRowY, 92, 28};
+        const Rect flipButton{actionRowX + 208, actionRowY, 156, 28};
+        drawToggle(display, backBuffer, gc, palette, saveButton, "Save");
         drawToggle(display, backBuffer, gc, palette, importButton, "Import");
         drawToggle(display, backBuffer, gc, palette, flipButton, previewMode == PreviewMode::Dithered ? "Dithered" : "Original");
-
-        drawStepControl(display, backBuffer, gc, palette, windowWidth, 64, "Zoom", settings.scale, "x");
-        drawStepControl(display, backBuffer, gc, palette, windowWidth, 116, "Pixel Size", settings.pixelSize, "px");
+        drawStepControl(display, backBuffer, gc, palette, saveButton.x, previewLayout.y + previewLayout.height + 64, "Export Mult.", settings.exportScale, "x");
 
         const int panelX = windowWidth - kPanelWidth + kMargin;
+        drawStepControl(display, backBuffer, gc, palette, panelX, 64, "Zoom", settings.scale, "x");
+        drawStepControl(display, backBuffer, gc, palette, panelX, 116, "Pixel Size", settings.pixelSize, "px");
+
         const Rect colorsTab{panelX, 170, 122, 28};
         const Rect ditherTab{panelX + 130, 170, 122, 28};
         drawTab(display, backBuffer, gc, palette, colorsTab, "Colors", settings.activeTab == SideTab::Colors);
@@ -674,11 +743,16 @@ int main(int argc, char** argv) {
     while (running) {
         if (importPending && importCompleted) {
             std::optional<std::string> importedPath;
+            std::optional<Image> importedImage;
             {
                 std::lock_guard<std::mutex> lock(importMutex);
                 if (finishedImportPath.has_value()) {
                     importedPath = std::move(finishedImportPath);
                     finishedImportPath.reset();
+                }
+                if (finishedImportImage.has_value()) {
+                    importedImage = std::move(finishedImportImage);
+                    finishedImportImage.reset();
                 }
             }
 
@@ -687,14 +761,10 @@ int main(int argc, char** argv) {
             }
             importPending = false;
 
-            if (importedPath.has_value()) {
-                importImageFromPath(*importedPath, source, settings, dithered, dirty, needsRedraw);
-                ensureChannelCount(settings);
-                sliders = makeSliders(settings);
-                palette = makePalette(display, screen, settings.theme);
-                viewPanX = 0.0;
-                viewPanY = 0.0;
-                previewMode = PreviewMode::Original;
+            if (importedImage.has_value()) {
+                applyImportedImage(std::move(*importedImage));
+            } else if (importedPath.has_value()) {
+                std::cerr << "Could not load image: " << *importedPath << "\n";
             }
         }
 
@@ -732,8 +802,13 @@ int main(int argc, char** argv) {
                 const Rect ditherTab{panelX + 130, 170, 122, 28};
                 const PreviewLayout previewLayout = computePreviewLayout(windowWidth, windowHeight);
                 const Rect previewRect{previewLayout.x, previewLayout.y, previewLayout.width, previewLayout.height};
-                const Rect importButton{previewLayout.x, previewLayout.y + previewLayout.height + 8, 92, 28};
-                const Rect flipButton{previewLayout.x + 100, previewLayout.y + previewLayout.height + 8, 156, 28};
+                const int actionRowY = previewLayout.y + previewLayout.height + 8;
+                const int actionRowX = previewLayout.x;
+                const Rect saveButton{actionRowX, actionRowY, 92, 28};
+                const Rect importButton{actionRowX + 104, actionRowY, 92, 28};
+                const Rect flipButton{actionRowX + 208, actionRowY, 156, 28};
+                const Rect exportMinus{saveButton.x, previewLayout.y + previewLayout.height + 76, 38, 26};
+                const Rect exportPlus{saveButton.x + 52, previewLayout.y + previewLayout.height + 76, 38, 26};
 
                 if (themeToggle.contains(event.xbutton.x, event.xbutton.y)) {
                     settings.theme = settings.theme == Theme::Dark ? Theme::Light : Theme::Dark;
@@ -773,6 +848,18 @@ int main(int argc, char** argv) {
                 }
                 if (flipButton.contains(event.xbutton.x, event.xbutton.y)) {
                     previewMode = previewMode == PreviewMode::Dithered ? PreviewMode::Original : PreviewMode::Dithered;
+                    needsRedraw = true;
+                }
+                if (saveButton.contains(event.xbutton.x, event.xbutton.y)) {
+                    performExport();
+                    needsRedraw = true;
+                }
+                if (exportMinus.contains(event.xbutton.x, event.xbutton.y)) {
+                    settings.exportScale = std::max(1, settings.exportScale - 1);
+                    needsRedraw = true;
+                }
+                if (exportPlus.contains(event.xbutton.x, event.xbutton.y)) {
+                    settings.exportScale = std::min(8, settings.exportScale + 1);
                     needsRedraw = true;
                 }
 
@@ -930,14 +1017,7 @@ int main(int argc, char** argv) {
                 } else if (key == XK_i || key == XK_I) {
                     startImport();
                 } else if (key == XK_s || key == XK_S) {
-                    if (dirty) {
-                        workingSource = prepareImage(source, settings.pixelSize);
-                        dithered = ditherImage(workingSource, settings);
-                        dirty = false;
-                    }
-                    if (savePpm("opendither-output.ppm", workingSource, dithered, std::clamp(settings.channelCount, 2, 4))) {
-                        std::cout << "Saved opendither-output.ppm\n";
-                    }
+                    performExport();
                 }
             }
         }
