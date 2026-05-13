@@ -11,9 +11,9 @@ cmake --build build
 ```
 ## Future/Goals
 
-- UI port to windows
+### - UI port to windows - 40% done
 - add post processing and glow effects (and much more)
-- video support
+- video dithering support
 - keyframe support for dithering settings of videos and images
 
 
