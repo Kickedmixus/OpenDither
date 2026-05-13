@@ -1,6 +1,6 @@
-# OpenDither
+![logo](https://i.imgur.com/BcMysWw.png)
 
-An early C++ black-and-white dithering playground inspired by Dither Boy.
+Dithering playground inspired by Dither Boy. Its open source and free!
 
 ## Build
 
@@ -9,17 +9,17 @@ cmake -S . -B build
 cmake --build build
 ./build/opendither
 ```
+## Future/Goals
 
-You can optionally pass a PPM image (`P3` or `P6`) as the first argument:
+- UI port to windows
+- add post processing and glow effects (and much more)
+- video support
+- keyframe support for dithering settings of videos and images
 
-```sh
-./build/opendither image.ppm
-```
 
 ## Current Controls
 
-- Sliders: threshold, contrast, brightness, noise, and preview scale.
+- Sliders: threshold, contrast, brightness, noise, and pixel scale.
+- Color channels and setting allow for diffrent gradient types and channels to be set as the dithered pixels
 - Formula buttons: threshold, ordered Bayer, Floyd-Steinberg, Atkinson, and Jarvis-Judice-Ninke.
-- `R`: reset settings.
-- `S`: save the current dithered preview to `opendither-output.ppm`.
-- `Esc`: quit.
+- Import and save files in many types, you can multiply each pixel for higher file resolution too!
